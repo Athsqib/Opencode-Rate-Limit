@@ -12,7 +12,6 @@
  * The TUI half (./tui.tsx) renders it under the prompt.
  *
  * Optional env:
- *   OPENCODE_QUOTA_DAILY_LIMIT   requests/day to display (default 200)
  *   OPENCODE_QUOTA_NO_FILES=1    do not write the status files
  */
 
@@ -21,7 +20,6 @@ import { mkdir, writeFile } from "node:fs/promises"
 import { homedir } from "node:os"
 import { join } from "node:path"
 
-const DAILY_LIMIT = Number(process.env.OPENCODE_QUOTA_DAILY_LIMIT ?? "200") || 200
 const WRITE_FILES = process.env.OPENCODE_QUOTA_NO_FILES !== "1"
 const OUT_DIR = join(homedir(), ".local", "share", "opencode", "quota")
 
@@ -33,6 +31,18 @@ type Account = {
   models7d?: { model: string; requests: number }[]
   error?: string
 }
+
+/** Compact account snapshot mirrored into status.json for the TUI half. */
+type AccountSnapshot = {
+  day: string
+  requests: number
+  week?: number
+  month?: number
+  fetchedAt: number
+}
+
+let accountSnapshot: AccountSnapshot | undefined
+let accountCache: Account | undefined
 
 type Status = {
   date: string
@@ -79,26 +89,25 @@ function pickHeaders(headers: Headers) {
 }
 
 function renderAccount(a: Account | undefined) {
-  if (!a) return ["  account  (not available - sign in to OpenCode Console)"]
-  if (a.error) return [`  account  unavailable (${a.error})`]
-  const lines = ["  account usage (OpenCode Console, completed days)"]
-  const days = a.days.slice(-5)
-  if (days.length === 0) {
-    lines.push("    no daily rows returned")
-  } else {
-    const width = Math.max(...days.map((d) => d.date.length))
-    for (const d of [...days].reverse()) {
-      lines.push(`    ${d.date.padEnd(width)}  ${String(d.requests).padStart(5)} req`)
-    }
+  if (!a) return ["  account         (sign in to OpenCode Console for account-wide usage)"]
+  if (a.error) return [`  account         unavailable (${a.error})`]
+  const lines: string[] = []
+  const today = a.days.at(-1)
+  if (today) {
+    const at = new Date(a.fetchedAt).toISOString().slice(11, 16)
+    lines.push(`  account today   ${String(today.requests).padStart(5)} req   all machines · fetched ${at} UTC`)
   }
   const parts: string[] = []
   if (a.total7d !== undefined) parts.push(`${a.total7d} req / 7d`)
   if (a.total30d !== undefined) parts.push(`${a.total30d} req / 30d`)
-  if (parts.length) lines.push(`    ${parts.join("  ·  ")}`)
+  if (parts.length) lines.push(`  account total   ${parts.join("  ·  ")}`)
   if (a.models7d?.length) {
-    lines.push(`    ${a.models7d.map((m) => `${m.model}=${m.requests}`).join("  ")}  (7d)`)
+    lines.push(`  models 7d       ${a.models7d.map((m) => `${m.model}=${m.requests}`).join("  ")}`)
   }
-  lines.push(`    fetched ${new Date(a.fetchedAt).toISOString()}`)
+  const recent = a.days.slice(-4).reverse()
+  if (recent.length > 1) {
+    lines.push(`  recent days     ${recent.map((d) => `${d.date.slice(5)}=${d.requests}`).join("  ")}`)
+  }
   return lines
 }
 
@@ -107,38 +116,25 @@ function render(s: Status, account?: Account) {
   const rows = Object.entries(s.requests)
     .filter(([k]) => k.startsWith("opencode/"))
     .sort((a, b) => b[1] - a[1])
+  const localTotal = rows
+    .filter(([k]) => isFree(k.split("/")[1] ?? ""))
+    .reduce((n, [, c]) => n + c, 0)
+  const day = account?.days.at(-1)?.date ?? s.date
 
   const lines: string[] = []
-  lines.push(`OpenCode quota · ${s.date} UTC`)
-  if (rows.length === 0) {
-    lines.push("  no requests recorded yet today")
-  } else {
-    const width = Math.max(...rows.map(([k]) => k.length))
+  lines.push(`OpenCode quota · ${day} UTC`)
+  lines.push(...renderAccount(account))
+  lines.push(`  this machine    ${String(localTotal).padStart(5)} req   counted locally since ${s.date} 00:00 UTC`)
+  if (rows.length > 0) {
     for (const [key, count] of rows) {
-      const [, modelID] = key.split("/")
-      if (!isFree(modelID ?? "")) {
-        lines.push(`  ${key.padEnd(width)}  ${String(count).padStart(5)} req   (paid)`)
-        continue
-      }
-      const left = Math.max(0, DAILY_LIMIT - count)
-      const pct = Math.min(100, Math.round((count / DAILY_LIMIT) * 100))
-      const filled = Math.round(pct / 5)
-      const bar = "█".repeat(filled) + "░".repeat(20 - filled)
-      lines.push(
-        `  ${key.padEnd(width)}  ${String(count).padStart(3)}/${DAILY_LIMIT} req  ${bar} ${String(pct).padStart(3)}%  ${left} left`,
-      )
+      const [, modelID = key] = key.split("/")
+      const tag = isFree(modelID) ? "" : "  (paid)"
+      lines.push(`    ${modelID}  ${count} req${tag}`)
     }
   }
-  const freeTotal = Object.entries(s.requests)
-    .filter(([k]) => k.startsWith("opencode/") && isFree(k.split("/")[1] ?? ""))
-    .reduce((n, [, c]) => n + c, 0)
-  if (rows.length > 1) {
-    lines.push(`  free total  ${freeTotal} requests across free models`)
-  }
   lines.push(`  reset  00:00 UTC (in ${humanDuration(reset - Date.now())})`)
-  lines.push(...renderAccount(account))
   if (s.lastLimit) {
-    const when = new Date(s.lastLimit.at).toISOString()
+    const when = new Date(s.lastLimit.at).toISOString().slice(0, 16).replace("T", " ")
     const head = Object.entries(s.lastLimit.headers)
       .map(([k, v]) => `${k}=${v}`)
       .join(", ")
@@ -175,10 +171,14 @@ export default Plugin.define({
       cache = s
       await ctx.storage.set("status", s)
       if (!WRITE_FILES) return
-      const text = render(s) + "\n"
+      const text = render(s, accountCache) + "\n"
       try {
         await mkdir(OUT_DIR, { recursive: true })
-        await writeFile(join(OUT_DIR, "status.json"), JSON.stringify(s, null, 2), "utf8")
+        await writeFile(
+          join(OUT_DIR, "status.json"),
+          JSON.stringify({ ...s, account: accountSnapshot }, null, 2),
+          "utf8",
+        )
         await writeFile(join(OUT_DIR, "status.txt"), text, "utf8")
       } catch {
         // status files are a convenience, never fail a request over them
@@ -213,11 +213,32 @@ export default Plugin.define({
     }
 
     let pulling: Promise<Account | undefined> | undefined
+    const applyAccount = (next: Account) => {
+      accountCache = next
+      const latest = next.days.at(-1)
+      accountSnapshot = latest
+        ? {
+            day: latest.date,
+            requests: latest.requests,
+            week: next.total7d,
+            month: next.total30d,
+            fetchedAt: next.fetchedAt,
+          }
+        : undefined
+      // Refresh the status files so the TUI half sees the account number.
+      mutate(() => {})
+    }
     const pullAccount = (maxAge = 5 * 60_000): Promise<Account | undefined> => {
       if (pulling) return pulling
       pulling = (async () => {
         const cached = await readAccount()
-        if (cached && Date.now() - cached.fetchedAt < maxAge) return cached
+        const age = cached ? Date.now() - cached.fetchedAt : Number.POSITIVE_INFINITY
+        // A cached snapshot dated in the future means the clock moved backwards;
+        // treat it as stale instead of trusting it forever.
+        if (cached && age >= 0 && age < maxAge) {
+          applyAccount(cached)
+          return cached
+        }
         const token = await accessToken()
         if (!token) return cached
         const headers = { authorization: `Bearer ${token}` }
@@ -250,6 +271,7 @@ export default Plugin.define({
           error: byDay || week ? undefined : "request failed",
         }
         await ctx.storage.set("account", next)
+        applyAccount(next)
         return next
       })()
         .catch(() => undefined)
@@ -307,7 +329,7 @@ export default Plugin.define({
       editor.add({
         name: "today",
         description:
-          "Show today's OpenCode provider request usage (free models are capped per day), the next reset, and any rate-limit headers seen.",
+          "Show OpenCode request usage: account-wide requests today (Console API) plus how many this machine sent, the next 00:00 UTC reset, and any rate-limit headers seen.",
         input: { type: "object", properties: {}, additionalProperties: false },
         options: { namespace: "requests", codemode: true },
         execute: async () => {

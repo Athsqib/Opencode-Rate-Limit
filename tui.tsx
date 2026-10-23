@@ -2,8 +2,13 @@
  * opencode-quota (terminal side)
  *
  * Renders the quota snapshot written by the server half under the prompt and
- * on the home footer, e.g. `quota 11/200 · 189 left`. Polls the status file so
- * it never needs a model request.
+ * on the home footer, e.g.
+ *
+ *   acct 218 today · 165 here
+ *
+ * `acct` comes from the OpenCode Console usage API and covers every machine on
+ * the account; `here` is what this machine counted itself. Polls the status
+ * file so it never needs a model request.
  */
 
 import { Plugin } from "@opencode/plugin/tui"
@@ -13,11 +18,11 @@ import { homedir } from "node:os"
 import { join } from "node:path"
 
 const FILE = join(homedir(), ".local", "share", "opencode", "quota", "status.json")
-const LIMIT = Number(process.env.OPENCODE_QUOTA_DAILY_LIMIT ?? "200") || 200
 
 type Status = {
   date: string
   requests: Record<string, number>
+  account?: { day: string; requests: number; fetchedAt: number }
   lastLimit?: { status?: number }
 }
 
@@ -31,17 +36,19 @@ export default Plugin.define({
     const refresh = async () => {
       try {
         const status = JSON.parse(await readFile(FILE, "utf8")) as Status
-        if (status.date !== new Date().toISOString().slice(0, 10)) {
-          setLabel("")
-          return
-        }
-        const used = Object.entries(status.requests)
+        const local = Object.entries(status.requests)
           .filter(([key]) => key.startsWith("opencode/") && isFree(key.split("/")[1] ?? ""))
           .reduce((sum, [, count]) => sum + count, 0)
-        const left = Math.max(0, LIMIT - used)
-        const pct = Math.min(100, Math.round((used / LIMIT) * 100))
-        const alert = status.lastLimit?.status === 429 || pct >= 90 ? " !" : ""
-        setLabel(`req ${used}/${LIMIT} · ${left} left${alert}`)
+
+        if (status.lastLimit?.status === 429) {
+          setLabel("limit hit · resets 00:00 UTC")
+          return
+        }
+        if (status.account) {
+          setLabel(`acct ${status.account.requests} today · ${local} here`)
+          return
+        }
+        setLabel(local > 0 ? `req ${local} here` : "")
       } catch {
         setLabel("")
       }

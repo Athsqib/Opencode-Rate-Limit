@@ -1,6 +1,6 @@
 {
   "name": "opencode-quota",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Count OpenCode provider requests per day, show them in the TUI footer and as a requests_today tool",
   "type": "module",
   "exports": {
