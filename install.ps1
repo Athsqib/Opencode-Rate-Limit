@@ -9,6 +9,7 @@ New-Item -ItemType Directory -Force -Path $dest | Out-Null
 
 Copy-Item (Join-Path $src "index.ts")      $dest
 Copy-Item (Join-Path $src "tui.tsx")       $dest
+Copy-Item (Join-Path $src "tui.js")        $dest
 Copy-Item (Join-Path $src "package.json")  $dest
 
 Write-Host "Installed opencode-quota -> $dest"
