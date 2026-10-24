@@ -1,0 +1,13 @@
+{
+  "name": "opencode-quota",
+  "version": "1.0.0",
+  "description": "Show OpenCode request usage in the TUI footer and as a quota_status tool",
+  "type": "module",
+  "exports": {
+    ".": "./index.ts",
+    "./tui": "./tui.tsx"
+  },
+  "files": ["index.ts", "tui.tsx", "README.md"],
+  "keywords": ["opencode", "opencode-plugin", "quota", "usage", "rate-limit"],
+  "license": "MIT"
+}
