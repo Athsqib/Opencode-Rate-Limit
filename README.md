@@ -3,7 +3,7 @@
 Shows how many requests OpenCode is using, in the TUI footer and as a model-callable tool.
 
 ```text
-quota 53 · 147 left          ← footer badge (prompt + home)
+req 53/200 · 147 left          ← footer badge (prompt + home)
 ```
 
 - **Server half** (`index.ts`): counts each request to the `opencode` provider per UTC day,
@@ -49,8 +49,8 @@ opencode plugin add github:<you>/opencode-quota
 
 ## Use
 
-- Footer badge: `quota 53 · 147 left` (warning suffix `!` at 90% or after a 429).
-- Tool: ask the agent "how's my quota?" — it calls `quota_status`.
+- Footer badge: `req 53/200 · 147 left` (warning suffix `!` at 90% or after a 429).
+- Tool: ask the agent "how many requests today?" — it calls `requests_today`.
 - Files (no model call needed):
 
 ```sh

@@ -41,7 +41,7 @@ export default Plugin.define({
         const left = Math.max(0, LIMIT - used)
         const pct = Math.min(100, Math.round((used / LIMIT) * 100))
         const alert = status.lastLimit?.status === 429 || pct >= 90 ? " !" : ""
-        setLabel(`quota ${used}/${LIMIT} · ${left} left${alert}`)
+        setLabel(`req ${used}/${LIMIT} · ${left} left${alert}`)
       } catch {
         setLabel("")
       }

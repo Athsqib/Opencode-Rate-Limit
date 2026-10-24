@@ -303,13 +303,13 @@ export default Plugin.define({
     })
 
     await ctx.tool.transform((editor) => {
-      editor.namespace({ name: "quota", description: "OpenCode request quota" })
+      editor.namespace({ name: "requests", description: "Request counts for the opencode provider" })
       editor.add({
-        name: "status",
+        name: "today",
         description:
           "Show today's OpenCode provider request usage (free models are capped per day), the next reset, and any rate-limit headers seen.",
         input: { type: "object", properties: {}, additionalProperties: false },
-        options: { namespace: "quota", codemode: true },
+        options: { namespace: "requests", codemode: true },
         execute: async () => {
           const account = await pullAccount(60_000)
           return { content: render(await load(), account) }
