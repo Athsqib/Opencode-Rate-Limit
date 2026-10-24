@@ -39,12 +39,24 @@ Point OpenCode at the folder in `opencode.jsonc`:
 }
 ```
 
-### Option C — from a Git repository
-
-Push this folder to GitHub, then on any machine:
+### Option C — from GitHub (easiest)
 
 ```sh
-opencode plugin add github:<you>/opencode-quota
+opencode plugin add github:Athsqib/Opencode-Rate-Limit
+```
+
+Then restart OpenCode. This installs the plugin from
+<https://github.com/Athsqib/Opencode-Rate-Limit> and adds it to the global config.
+
+## Develop
+
+`tui.js` is the prebuilt bundle of `tui.tsx`. OpenCode only transpiles JSX for plugins
+copied into `~/.config/opencode/plugins`, so git/npm installs need the prebuilt file.
+After editing `tui.tsx`, rebuild and commit both:
+
+```sh
+npx esbuild tui.tsx --format=esm --platform=neutral --jsx=automatic \
+  --jsx-import-source=@opentui/solid --target=es2022 --outfile=tui.js
 ```
 
 ## Use
